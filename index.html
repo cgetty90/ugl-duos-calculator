@@ -181,7 +181,7 @@
 
       <div class="note">
         Placement multiplier:
-        <b>1st</b> 2.0x, <b>2nd</b> 1.75x, <b>3rd–5th</b> 1.5x, <b>6th–10th</b> 1.25x.
+        <b>1st</b> 2.0x, <b>2nd</b> 1.75x, <b>3rd–5th</b> 1.5x, <b>6th–10th</b> 1.25x, <b>10+</b> 1.0x.
         <br/>
         Map Total = (Kills × Multiplier) ÷ Divider.
       </div>
@@ -259,7 +259,7 @@
         <thead>
           <tr>
             <th style="width:140px;">Map</th>
-            <th style="width:200px;">Placement</th>
+            <th style="width:220px;">Placement</th>
             <th style="width:140px;">Kills</th>
             <th>Breakdown</th>
             <th class="right" style="width:140px;">Total</th>
@@ -276,22 +276,24 @@
 
   <script>
     // ---------- CONFIG ----------
-    const STORAGE_KEY = "ugl_duos_score_helper_v1";
+    const STORAGE_KEY = "ugl_duos_score_helper_v3";
     const TTL_MS = 60 * 60 * 1000; // 1 hour
 
-    // Placement options for dropdown (1..10)
-    const placementOptions = [1,2,3,4,5,6,7,8,9,10];
+    // Dropdown options: 1..10 plus a special "10+" bucket
+    const placementOptions = [1,2,3,4,5,6,7,8,9,10,"10+"];
 
     function placementMultiplier(p){
       if (p === 1) return 2.0;
       if (p === 2) return 1.75;
-      if (p >= 3 && p <= 5) return 1.5;
-      if (p >= 6 && p <= 10) return 1.25;
+      if (typeof p === "number" && p >= 3 && p <= 5) return 1.5;
+      if (typeof p === "number" && p >= 6 && p <= 10) return 1.25;
+      if (p === "10+") return 1.0; // any placement worse than 10th
       return 0;
     }
 
     function placementLabel(p){
       if (!p) return "None";
+      if (p === "10+") return "10+";
       if (p === 1) return "1st";
       if (p === 2) return "2nd";
       if (p === 3) return "3rd";
@@ -318,7 +320,7 @@
       target: 130,
       maps: {}
     };
-    maps.forEach(m => state.maps[m.key] = { placement:null, kills:0 });
+    maps.forEach(m => state.maps[m.key] = { placement:"10+", kills:0 });
 
     // ---------- STORAGE (1 hour TTL) ----------
     function saveState(){
@@ -346,7 +348,9 @@
           for (const m of maps){
             const sm = s.maps[m.key];
             if (!sm) continue;
-            state.maps[m.key].placement = (sm.placement === null || sm.placement === undefined) ? null : Number(sm.placement);
+            // placement can be number OR "10+"
+            state.maps[m.key].placement =
+              (sm.placement === null || sm.placement === undefined) ? null : sm.placement;
             state.maps[m.key].kills = Math.max(0, Math.floor(Number(sm.kills || 0)));
           }
         }
@@ -365,7 +369,6 @@
       const opts = placementOptions.map(p => `<option value="${p}">${placementLabel(p)}</option>`).join("");
       return `
         <select data-key="${key}" data-field="placement">
-          <option value="">None</option>
           ${opts}
         </select>
       `;
@@ -390,7 +393,7 @@
       mapsBody.querySelectorAll("select").forEach(sel => {
         const key = sel.dataset.key;
         const p = state.maps[key].placement;
-        sel.value = p ? String(p) : "";
+        sel.value = (p === null || p === undefined) ? "" : String(p);
       });
       mapsBody.querySelectorAll("input[data-field='kills']").forEach(inp => {
         const key = inp.dataset.key;
@@ -401,7 +404,11 @@
       mapsBody.querySelectorAll("select").forEach(sel => {
         sel.addEventListener("change", () => {
           const key = sel.dataset.key;
-          state.maps[key].placement = sel.value ? Number(sel.value) : null;
+          const v = sel.value;
+          if (!v) state.maps[key].placement = null;
+          else if (v === "10+") state.maps[key].placement = "10+";
+          else state.maps[key].placement = Number(v);
+
           saveState();
           recalc();
         });
@@ -426,7 +433,7 @@
       const k = map.kills || 0;
       if (!p) return { kills:k, multi:0, raw:0, played:false };
       const multi = placementMultiplier(p);
-      const raw = k * multi; // no bonus, multiplier scoring
+      const raw = k * multi;
       return { kills:k, multi, raw, played:true };
     }
 
@@ -466,8 +473,6 @@
       return { counted: base, totalBest4, usedReset, remainingMaps };
     }
 
-    // Kills needed for ONE map to reach required RAW points, given placement bucket
-    // raw = kills * multiplier  => kills >= requiredRaw / multiplier
     function killsNeededForRaw(requiredRaw, multiplier){
       if (requiredRaw <= 0) return 0;
       if (!(multiplier > 0)) return null;
@@ -479,7 +484,7 @@
       const divider = state.divider;
       const target = state.target;
 
-      // Per-map breakdown table
+      // Per-map breakdown
       for (const m of maps){
         const s = mapScore(state.maps[m.key]);
         const total = totalFromRaw(s.raw, divider) || 0;
@@ -527,51 +532,58 @@
 
       if (!(divider > 0)){
         reqPill.textContent = "Enter divider";
-        reqBody.innerHTML = placementOptions.map(p => `
-          <tr>
-            <td><b>${placementLabel(p)}</b></td>
-            <td class="reqKills mono">—</td>
-          </tr>
+        reqBody.innerHTML = [
+          { label:"1st", multi:2.0 },
+          { label:"2nd", multi:1.75 },
+          { label:"3rd–5th", multi:1.5 },
+          { label:"6th–10th", multi:1.25 },
+          { label:"10+", multi:1.0 },
+        ].map(r => `
+          <tr><td><b>${r.label}</b></td><td class="reqKills mono">—</td></tr>
         `).join("");
         return;
       }
 
       if (remaining <= 0){
         reqPill.textContent = "Target reached";
-        reqBody.innerHTML = placementOptions.map(p => `
-          <tr>
-            <td><b>${placementLabel(p)}</b></td>
-            <td class="reqKills mono">0</td>
-          </tr>
+        reqBody.innerHTML = [
+          { label:"1st", multi:2.0 },
+          { label:"2nd", multi:1.75 },
+          { label:"3rd–5th", multi:1.5 },
+          { label:"6th–10th", multi:1.25 },
+          { label:"10+", multi:1.0 },
+        ].map(r => `
+          <tr><td><b>${r.label}</b></td><td class="reqKills mono">0</td></tr>
         `).join("");
         return;
       }
 
       const remainingMaps = best.remainingMaps;
-
       if (remainingMaps === 0){
         reqPill.textContent = "No remaining counted maps";
-        reqBody.innerHTML = placementOptions.map(p => `
-          <tr>
-            <td><b>${placementLabel(p)}</b></td>
-            <td class="reqKills mono">—</td>
-          </tr>
+        reqBody.innerHTML = [
+          { label:"1st", multi:2.0 },
+          { label:"2nd", multi:1.75 },
+          { label:"3rd–5th", multi:1.5 },
+          { label:"6th–10th", multi:1.25 },
+          { label:"10+", multi:1.0 },
+        ].map(r => `
+          <tr><td><b>${r.label}</b></td><td class="reqKills mono">—</td></tr>
         `).join("");
         return;
       }
 
       reqPill.textContent = `${fmt(remaining,2)} points left`;
 
-      // average needed per remaining counted map
       const neededTotalPerMap = remaining / remainingMaps;
       const neededRawPerMap = neededTotalPerMap * divider;
 
-      // Show placement buckets (as requested, simple)
       const rows = [
         { label: "1st", multi: 2.0 },
         { label: "2nd", multi: 1.75 },
         { label: "3rd–5th", multi: 1.5 },
         { label: "6th–10th", multi: 1.25 },
+        { label: "10+", multi: 1.0 },
       ];
 
       reqBody.innerHTML = rows.map(r => {
@@ -619,7 +631,7 @@
 
     buildMapRows();
     recalc();
-    saveState(); // refresh TTL on open
+    saveState();
   </script>
 </body>
 </html>
