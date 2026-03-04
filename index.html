@@ -320,7 +320,7 @@
       target: 130,
       maps: {}
     };
-    maps.forEach(m => state.maps[m.key] = { placement:"10+", kills:0 });
+    maps.forEach(m => state.maps[m.key] = { placement:"null", kills:0 });
 
     // ---------- STORAGE (1 hour TTL) ----------
     function saveState(){
@@ -369,6 +369,7 @@
       const opts = placementOptions.map(p => `<option value="${p}">${placementLabel(p)}</option>`).join("");
       return `
         <select data-key="${key}" data-field="placement">
+          <option value="">None</option>
           ${opts}
         </select>
       `;
